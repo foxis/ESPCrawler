@@ -16,11 +16,13 @@
 #define IMG_HEIGHT ADNS3080_PIXELS_Y
 #define SS 16
 #define RESET 3
+#define SCL 5
+#define SDA 6
 
 EasyOTA OTA(ARDUINO_HOSTNAME);
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
-ADNS3080 a3080(SS, RESET);
+Locomotion::ADNS3080 a3080(&SPI, SS, RESET);
 Locomotion::HexapodDrive hexapod(&Wire, motor_configs, NUMBER_OF_MOTORS);
 
 bool connected = false;
@@ -56,9 +58,10 @@ void setup() {
 		S_printf("OTA message: %s", msg.c_str());
 	});
 	// TODO replace with walker instead of ddrive.init();
-	a3080.begin();
+	a3080.begin(true);
 	hexapod.begin();
 	SPIFFS.begin();
+	Wire.begin(SDA, SCL);
 
 	server.addHandler(&ws);
 	server.serveStatic("/", SPIFFS, "/web").setDefaultFile("index.html");
