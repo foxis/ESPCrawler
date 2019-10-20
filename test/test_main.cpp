@@ -1,0 +1,1 @@
+#include "../test/test_locomotion_main.cpp"
