@@ -9,46 +9,36 @@
 
 #include "wificonfig.h"
 
-#include "math_utils.h"
+template<typename T, size_t N> void print_arr(const T * v, const char * name) {
+    Serial.print("Array ");
+    Serial.print(name);
+    Serial.print("    {");
+    for (int row = 0; row < N; row++) {
+        if (row != 0) 
+            Serial.print(", ");
+        Serial.print(v[row], 6);
+    }
+    Serial.println("}");
+}
+
+#define REAL_T float
+#include "kinematics/kinematics.h"
 #include "kinematics/PlanarKinematics.h"
-#include "HexapodDrive.h"
+#include "drives/MultipodDrive.h"
+#include "hal/ServoHAL_PCA9685.h"
+#include "controllers/multipod.h"
+
+using namespace Locomotion;
 
 #define SCL 5
-#define SDA 6
+#define SDA 16
 
-// Robot configuration
-typedef Locomotion::_PlanarJoint_t<Locomotion::real_t> JointConfig_t;
-typedef Locomotion::_PlanarKinematics<Locomotion::real_t, 2> Kinematics;
-typedef Locomotion::_Limb<Locomotion::real_t, Kinematics, 2> Limb;
-typedef Locomotion::_HexapodDrive<Locomotion::real_t, Kinematics, 2> Drive;
-typedef Locomotion::_Vector3D<Locomotion::real_t> Vector;
-typedef Locomotion::_ConstraintVolume<Locomotion::real_t> Constraint;
+#include "body_config.h"
+#include "servo_config.h"
 
-JointConfig_t joints[] = {
-	{
-		.constraints = {
-			.min = -1, // TODO
-			.max = 1
-		}, 
-		.length = 10 // TODO
-	},
-	{
-		{-.5, 1}, 
-		75
-	},
-};
-Constraint leg_working_volume(Constraint(Vector(45, -20, -40), Vector(65, 20, 40)));
-Kinematics kinematics(joints, leg_working_volume);
-
-Limb limbs[] = {
-	Limb(kinematics, Vector(30, 0, 110), Vector(0, 0, 0)),
-	Limb(kinematics, Vector(30, 0, 0), Vector(0, 0, 0)),
-	Limb(kinematics, Vector(30, 0, -90), Vector(0, 0, 0)),
-	Limb(kinematics, Vector(-30, 0, 110), Vector(M_PI, 0, 0)),
-	Limb(kinematics, Vector(-30, 0, 0), Vector(M_PI, 0, 0)),
-	Limb(kinematics, Vector(-30, 0, -90), Vector(M_PI, 0, 0)),
-};
-
+// robot config
+MultipodController<6> controller;
+MultipodDrive<6, 12> hexapod(servos, controller, limbs, limb_config, default_position, default_orientation);
 
 // server configuration
 
@@ -57,7 +47,6 @@ AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
 
 bool connected = false;
-unsigned long last_updated = 0;
 
 void textThem(const char * text) {
 	int tryId = 0;
@@ -80,36 +69,28 @@ void S_printf(const char * format, ...) {
 }
 
 void setup() {
-	Locomotion::real_t arr[] = {0, 1, 2, 3, 4, 5, 6, 7, 8};
-	Locomotion::Vector2D a(0.0);
-	Locomotion::Vector2D v(1, 2);
-	Locomotion::Vector2D b(1, 1);
-	Locomotion::Vector2D c(1, 1);
-	Locomotion::Vector2D e(a);
-	Locomotion::Vector2D f(arr);
-	Locomotion::_VectorStatic<Locomotion::real_t, 2> cc;
-	Locomotion::Quaternion q(1, 2, 3, 1);
-	c = b;
-	S_printf("dot: %f", v.dot(b + cc));
-	Locomotion::Matrix3x3 m3x3a;
-	Locomotion::Matrix3x3 m3x3b(0.0);
-	Locomotion::Matrix3x3 m3x3c(arr);
-	Locomotion::Matrix3x3 m3x3d(m3x3a);
-	Locomotion::Matrix3x3 m3x3e(0,1,2,3,4,5,6,7,8);
-	S_printf("det: %f", m3x3c.det());
+	Serial.begin(74880);
+	Serial.println("Serial initialized");
+	SPIFFS.begin();
+	Serial.println("SPIFFS initialized");
+	Wire.begin(SDA, SCL);
+	Serial.println("Wire initialized");
 
-	Locomotion::PlanarJoint_t joints[] = {
-		{
-			.constraints = {
-				.min = -1, 
-				.max = 1
-			}, 
-			.length = 10
-		},
-		{{-.5, 1}, 75},
-	};
-	Locomotion::PlanarKinematics<Locomotion::real_t, 2> limb(joints);
+	bool devices[255] = {false,};
+	pca.discover(devices, 255, 0);
+	for (size_t i = 0; i < 16; i++) {
+		for (size_t j = 0; j < 16; j++) {
+			Serial.print(" ");
+			if (devices[j + i * 16]) {
+				Serial.print(j + i * 16, HEX);
+			}
+			else 
+				Serial.print("--");
+		}
+		Serial.println();
+	}
 
+	Serial.println("Initializing OTA...");
 	OTA.addAP(WIFI_SSID, WIFI_PASSWORD);
 	OTA.onConnect([](const String& ssid, EasyOTA::STATE state) {
 		S_printf("Connected %s, state: %s", ssid.c_str(), state == EasyOTA::EOS_STA ? "Station" : "Access Point");
@@ -119,10 +100,9 @@ void setup() {
 		S_printf("OTA message: %s", msg.c_str());
 	});
 	// TODO replace with walker instead of ddrive.init();
-	SPIFFS.begin();
-	Wire.begin(SDA, SCL);
 
-	server.addHandler(&ws);
+	Serial.println("Initializing Server...");
+	/*server.addHandler(&ws);
 	server.serveStatic("/", SPIFFS, "/web").setDefaultFile("index.html");
 	server.on("/heap", HTTP_GET, [](AsyncWebServerRequest *request) {
 		request->send(200, "text/plain", String(ESP.getFreeHeap()));
@@ -145,14 +125,18 @@ void setup() {
 		}
 	});
 
-	server.begin();
+	server.begin(); */
+	Serial.println("Initializing hexapod");
+	hexapod.begin(micros(), false);
+	Serial.println("Crawler ready");
 }
 
 void loop() {
-	unsigned long now = millis();
-	static unsigned long last_now = millis();
+	timestamp_t now = micros();
+	static timestamp_t last_now = micros();
 
-	OTA.loop(now);
+	OTA.loop(now / 1000L);
+	hexapod.loop(now);
 
 	if (now - last_now > 20L && connected) {
 		float voltage = analogRead(0) * 10.0 / 1024.0;
@@ -160,10 +144,9 @@ void loop() {
 		//
 		static char buffer[4000] = "";
 		char tmp[10] = "";
-		sprintf(buffer, "{\"battery\":%.2f,\"heap\":%i}",
-			voltage, ESP.getFreeHeap());
+		sprintf(buffer, "{\"battery\":%.2f,\"heap\":%i}", voltage, ESP.getFreeHeap());
 
-		textThem(buffer);
+		//textThem(buffer);
 
 		last_now = now;
 	}
