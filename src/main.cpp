@@ -38,7 +38,7 @@ using namespace Locomotion;
 
 // robot config
 MultipodController<6> controller;
-MultipodDrive<6, 12> hexapod(servos, controller, limbs, limb_config, default_position, default_orientation);
+MultipodDrive<6, 12> hexapod(servos, controller, limbs, limb_config, working_space, default_position, default_orientation);
 
 // server configuration
 
@@ -134,9 +134,18 @@ void setup() {
 void loop() {
 	timestamp_t now = micros();
 	static timestamp_t last_now = micros();
+	static real_t d = 1;
+	static Vector3D pos(0.0);
 
 	OTA.loop(now / 1000L);
 	hexapod.loop(now);
+
+	if (now - last_now > 20L) {
+		pos.y += d;
+		if (pos.y >= hexapod.working_space.max.y || pos.y <= hexapod.working_space.min.y)
+			d = -d;
+		hexapod.set_position(pos);
+	}
 
 	if (now - last_now > 20L && connected) {
 		float voltage = analogRead(0) * 10.0 / 1024.0;

@@ -34,5 +34,6 @@ LimbConfig_t limb_config[] = {
         .orientation=Vector3D(0, 0, 0),
     },
 };
-Vector3D default_position(0, 0, -24);
+Vector3D default_position(0, 20, -24);
 Vector3D default_orientation(0.0);
+ConstraintVolume working_space(0, -30, -30, 0, 30, 30);
